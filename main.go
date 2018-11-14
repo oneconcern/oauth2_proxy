@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
@@ -25,7 +26,8 @@ func main() {
 	config := flagSet.String("config", "", "path to config file")
 	showVersion := flagSet.Bool("version", false, "print version string")
 
-	flagSet.String("http-address", "127.0.0.1:4180", "[http://]<addr>:<port> or unix://<path> to listen on for HTTP clients")
+	flagSet.String("http-address", ":4180", "[http://]<addr>:<port> or unix://<path> to listen on for HTTP clients")
+	flagSet.String("health-address", ":10239", "[http://]<addr>:<port> or unix://<path> to listen on for healthchecks")
 	flagSet.String("https-address", ":443", "<addr>:<port> to listen on for HTTPS clients")
 	flagSet.String("tls-cert", "", "path to certificate file")
 	flagSet.String("tls-key", "", "path to private key file")
@@ -115,6 +117,30 @@ func main() {
 			oauthproxy.SignInMessage = fmt.Sprintf("Authenticate using %v", opts.EmailDomains[0])
 		}
 	}
+
+	metrics := &http.Server{
+		Addr:         opts.HealthAddress,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/healthz" {
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, "ok")
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, r.URL.Path, "not found")
+		}),
+	}
+
+	// start the healthz and metrics http server
+	go func() {
+		err := metrics.ListenAndServe()
+		if err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "could not start healthz/metrics http server: %s\n", err)
+			os.Exit(1)
+		}
+	}()
 
 	if opts.HtpasswdFile != "" {
 		log.Printf("using htpasswd file %s", opts.HtpasswdFile)

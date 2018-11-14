@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"time"
 )
 
 type Server struct {
@@ -59,12 +58,31 @@ func (s *Server) ServeHTTP() {
 
 func (s *Server) ServeHTTPS() {
 	addr := s.Opts.HttpsAddress
+	// Inspired by https://blog.bracebin.com/achieving-perfect-ssl-labs-score-with-go
 	config := &tls.Config{
+		// Causes servers to use Go's default ciphersuite preferences,
+		// which are tuned to avoid attacks. Does nothing on clients.
+		PreferServerCipherSuites: true,
+		// Only use curves which have assembly implementations
+		// https://github.com/golang/go/tree/master/src/crypto/elliptic
+		CurvePreferences: []tls.CurveID{
+			tls.CurveP256,
+			tls.X25519,
+		},
+		NextProtos: []string{"http/1.1", "h2"},
+		// https://www.owasp.org/index.php/Transport_Layer_Protection_Cheat_Sheet#Rule_-_Only_Support_Strong_Protocols
 		MinVersion: tls.VersionTLS12,
-		MaxVersion: tls.VersionTLS12,
-	}
-	if config.NextProtos == nil {
-		config.NextProtos = []string{"http/1.1"}
+		// Use modern tls mode https://wiki.mozilla.org/Security/Server_Side_TLS#Modern_compatibility
+		// See security linter code: https://github.com/securego/gosec/blob/master/rules/tls_config.go#L11
+		// These ciphersuites support Forward Secrecy: https://en.wikipedia.org/wiki/Forward_secrecy
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		},
 	}
 
 	var err error
@@ -73,6 +91,7 @@ func (s *Server) ServeHTTPS() {
 	if err != nil {
 		log.Fatalf("FATAL: loading tls config (%s, %s) failed - %s", s.Opts.TLSCertFile, s.Opts.TLSKeyFile, err)
 	}
+	config.BuildNameToCertificate()
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -80,8 +99,9 @@ func (s *Server) ServeHTTPS() {
 	}
 	log.Printf("HTTPS: listening on %s", ln.Addr())
 
-	tlsListener := tls.NewListener(tcpKeepAliveListener{ln.(*net.TCPListener)}, config)
+	tlsListener := tls.NewListener(ln, config)
 	srv := &http.Server{Handler: s.Handler}
+	srv.SetKeepAlivesEnabled(true)
 	err = srv.Serve(tlsListener)
 
 	if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
@@ -89,22 +109,4 @@ func (s *Server) ServeHTTPS() {
 	}
 
 	log.Printf("HTTPS: closing %s", tlsListener.Addr())
-}
-
-// tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
-// connections. It's used by ListenAndServe and ListenAndServeTLS so
-// dead TCP connections (e.g. closing laptop mid-download) eventually
-// go away.
-type tcpKeepAliveListener struct {
-	*net.TCPListener
-}
-
-func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
-	tc, err := ln.AcceptTCP()
-	if err != nil {
-		return
-	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	return tc, nil
 }

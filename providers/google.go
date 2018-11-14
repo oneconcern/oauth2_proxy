@@ -145,6 +145,7 @@ func (p *GoogleProvider) Redeem(redirectURL, code string) (s *SessionState, err 
 		ExpiresOn:    time.Now().Add(time.Duration(jsonResponse.ExpiresIn) * time.Second).Truncate(time.Second),
 		RefreshToken: jsonResponse.RefreshToken,
 		Email:        email,
+		IdToken:      jsonResponse.IdToken,
 	}
 	return
 }

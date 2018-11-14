@@ -20,14 +20,15 @@ import (
 
 // Configuration Options that can be set by Command Line Flag, or Config File
 type Options struct {
-	ProxyPrefix  string `flag:"proxy-prefix" cfg:"proxy-prefix"`
-	HttpAddress  string `flag:"http-address" cfg:"http_address"`
-	HttpsAddress string `flag:"https-address" cfg:"https_address"`
-	RedirectURL  string `flag:"redirect-url" cfg:"redirect_url"`
-	ClientID     string `flag:"client-id" cfg:"client_id" env:"OAUTH2_PROXY_CLIENT_ID"`
-	ClientSecret string `flag:"client-secret" cfg:"client_secret" env:"OAUTH2_PROXY_CLIENT_SECRET"`
-	TLSCertFile  string `flag:"tls-cert" cfg:"tls_cert_file"`
-	TLSKeyFile   string `flag:"tls-key" cfg:"tls_key_file"`
+	ProxyPrefix   string `flag:"proxy-prefix" cfg:"proxy-prefix"`
+	HttpAddress   string `flag:"http-address" cfg:"http_address"`
+	HealthAddress string `flag:"health-address" cfg:"health_address"`
+	HttpsAddress  string `flag:"https-address" cfg:"https_address"`
+	RedirectURL   string `flag:"redirect-url" cfg:"redirect_url"`
+	ClientID      string `flag:"client-id" cfg:"client_id" env:"OAUTH2_PROXY_CLIENT_ID"`
+	ClientSecret  string `flag:"client-secret" cfg:"client_secret" env:"OAUTH2_PROXY_CLIENT_SECRET"`
+	TLSCertFile   string `flag:"tls-cert" cfg:"tls_cert_file"`
+	TLSKeyFile    string `flag:"tls-key" cfg:"tls_key_file"`
 
 	AuthenticatedEmailsFile  string   `flag:"authenticated-emails-file" cfg:"authenticated_emails_file"`
 	AzureTenant              string   `flag:"azure-tenant" cfg:"azure_tenant"`
@@ -53,6 +54,7 @@ type Options struct {
 	Upstreams             []string `flag:"upstream" cfg:"upstreams"`
 	SkipAuthRegex         []string `flag:"skip-auth-regex" cfg:"skip_auth_regex"`
 	PassBasicAuth         bool     `flag:"pass-basic-auth" cfg:"pass_basic_auth"`
+	PassBearerAuth        bool     `flag:"pass-bearer-auth" cfg:"pass_bearer_auth"`
 	BasicAuthPassword     string   `flag:"basic-auth-password" cfg:"basic_auth_password"`
 	PassAccessToken       bool     `flag:"pass-access-token" cfg:"pass_access_token"`
 	PassHostHeader        bool     `flag:"pass-host-header" cfg:"pass_host_header"`
@@ -97,6 +99,7 @@ func NewOptions() *Options {
 	return &Options{
 		ProxyPrefix:          "/oauth2",
 		HttpAddress:          "127.0.0.1:4180",
+		HealthAddress:        ":10239",
 		HttpsAddress:         ":443",
 		DisplayHtpasswdForm:  true,
 		CookieName:           "_oauth2_proxy",

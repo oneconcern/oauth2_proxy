@@ -63,6 +63,7 @@ type OAuthProxy struct {
 	SetXAuthRequest     bool
 	PassBasicAuth       bool
 	SkipProviderButton  bool
+	PassBearerAuth      bool
 	PassUserHeaders     bool
 	BasicAuthPassword   string
 	PassAccessToken     bool
@@ -199,6 +200,7 @@ func NewOAuthProxy(opts *Options, validator func(string) bool) *OAuthProxy {
 		compiledRegex:      opts.CompiledRegex,
 		SetXAuthRequest:    opts.SetXAuthRequest,
 		PassBasicAuth:      opts.PassBasicAuth,
+		PassBearerAuth:     opts.PassBearerAuth,
 		PassUserHeaders:    opts.PassUserHeaders,
 		BasicAuthPassword:  opts.BasicAuthPassword,
 		PassAccessToken:    opts.PassAccessToken,
@@ -697,6 +699,9 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) int
 	}
 	if p.PassAccessToken && session.AccessToken != "" {
 		req.Header["X-Forwarded-Access-Token"] = []string{session.AccessToken}
+	}
+	if p.PassBearerAuth && session.IdToken != "" {
+		req.Header["Authorization"] = []string{"Bearer " + session.IdToken}
 	}
 	if session.Email == "" {
 		rw.Header().Set("GAP-Auth", session.User)

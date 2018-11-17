@@ -506,12 +506,24 @@ func (p *OAuthProxy) GetRedirect(req *http.Request) (redirect string, err error)
 
 func (p *OAuthProxy) IsWhitelistedRequest(req *http.Request) (ok bool) {
 	isPreflightRequestAllowed := p.skipAuthPreflight && req.Method == "OPTIONS"
-	return isPreflightRequestAllowed || p.IsWhitelistedPath(req.URL.Path)
+	return isPreflightRequestAllowed ||
+		p.IsWhitelistedPath(req.URL.Path) ||
+		p.IsWhitelistedVirtualHostPath(req)
 }
 
 func (p *OAuthProxy) IsWhitelistedPath(path string) (ok bool) {
 	for _, u := range p.compiledRegex {
 		ok = u.MatchString(path)
+		if ok {
+			return
+		}
+	}
+	return
+}
+
+func (p *OAuthProxy) IsWhitelistedVirtualHostPath(req *http.Request) (ok bool) {
+	for _, u := range p.compiledRegexReg[req.Host] {
+		ok = u.MatchString(req.URL.Path)
 		if ok {
 			return
 		}

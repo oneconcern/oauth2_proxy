@@ -4,14 +4,7 @@ RUN mkdir -p /stage/data /stage/etc/ssl/certs &&\
   apk add --no-cache musl-dev gcc ca-certificates mailcap upx tzdata zip git &&\
   update-ca-certificates &&\
   cp /etc/ssl/certs/ca-certificates.crt /stage/etc/ssl/certs/ca-certificates.crt &&\
-  cp /etc/mime.types /stage/etc/mime.types &&\
-  go get -u github.com/kyoh86/richgo
-
-RUN apk add --no-cache gcc musl-dev make git bash gnupg &&\
-  git clone https://github.com/ncopa/su-exec /usr/src/su-exec &&\
-  cd /usr/src/su-exec &&\
-  LDFLAGS="-s -w" make su-exec-static &&\
-  cp ./su-exec-static /stage/su-exec
+  cp /etc/mime.types /stage/etc/mime.types
 
 WORKDIR /usr/share/zoneinfo
 RUN zip -r -0 /stage/zoneinfo.zip .

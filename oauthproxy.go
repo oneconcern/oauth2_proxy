@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	b64 "encoding/base64"
 	"errors"
 	"fmt"
 	"html/template"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -71,6 +75,7 @@ type OAuthProxy struct {
 	skipAuthRegex       []string
 	skipAuthPreflight   bool
 	compiledRegex       []*regexp.Regexp
+	compiledRegexReg    map[string][]*regexp.Regexp
 	templates           *template.Template
 	Footer              string
 }
@@ -87,26 +92,45 @@ func (u *UpstreamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set("GAP-Auth", w.Header().Get("GAP-Auth"))
 		u.auth.SignRequest(r)
 	}
-	u.handler.ServeHTTP(w, r)
+	nctx := context.WithValue(r.Context(), "vhost", r.Host)
+	u.handler.ServeHTTP(w, r.WithContext(nctx))
 }
 
 func NewReverseProxy(target *url.URL) (proxy *httputil.ReverseProxy) {
 	return httputil.NewSingleHostReverseProxy(target)
 }
-func setProxyUpstreamHostHeader(proxy *httputil.ReverseProxy, target *url.URL) {
+func setProxyUpstreamHostHeader(proxy *httputil.ReverseProxy, target *url.URL, up string) {
 	director := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		director(req)
-		// use RequestURI so that we aren't unescaping encoded slashes in the request path
 		req.Host = target.Host
+		vhost := req.Context().Value("vhost").(string)
+		if vhost == "" && up != "" {
+			req.URL.Host = up
+		}
+		if vhost != "" {
+			req.URL.Host = vhost
+		}
+
+		// use RequestURI so that we aren't unescaping encoded slashes in the request path
 		req.URL.Opaque = req.RequestURI
 		req.URL.RawQuery = ""
 	}
 }
-func setProxyDirector(proxy *httputil.ReverseProxy) {
+func setProxyDirector(proxy *httputil.ReverseProxy, up string) {
 	director := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		director(req)
+		vhost := req.Context().Value("vhost").(string)
+		if vhost == "" && up != "" {
+			req.Host = up
+			req.URL.Host = up
+		}
+		if vhost != "" {
+			req.Host = vhost
+			req.URL.Host = vhost
+		}
+
 		// use RequestURI so that we aren't unescaping encoded slashes in the request path
 		req.URL.Opaque = req.RequestURI
 		req.URL.RawQuery = ""
@@ -131,10 +155,49 @@ func NewOAuthProxy(opts *Options, validator func(string) bool) *OAuthProxy {
 			log.Printf("mapping path %q => upstream %q", path, u)
 			proxy := NewReverseProxy(u)
 			if !opts.PassHostHeader {
-				setProxyUpstreamHostHeader(proxy, u)
+				setProxyUpstreamHostHeader(proxy, u, opts.UpstreamHostname)
 			} else {
-				setProxyDirector(proxy)
+				setProxyDirector(proxy, opts.UpstreamHostname)
 			}
+
+			// create client tls config
+			cfg := &tls.Config{}
+
+			if opts.TLSCAFile != "" {
+				log.Println("configuring upstream ca", opts.TLSCAFile)
+				caCert, err := ioutil.ReadFile(opts.TLSCAFile)
+				if err != nil {
+					log.Fatalf("tls client ca: %v", err)
+				}
+				caCertPool := x509.NewCertPool()
+				caCertPool.AppendCertsFromPEM(caCert)
+				cfg.RootCAs = caCertPool
+			}
+			cfg.InsecureSkipVerify = false
+			cfg.BuildNameToCertificate()
+
+			dialer := &net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+				DualStack: true,
+			}
+			newAddr := u.Host
+			if strings.LastIndex(newAddr, ":") < 0 {
+				if u.Scheme == "https" {
+					newAddr += ":443"
+				} else {
+					newAddr += ":80"
+				}
+			}
+
+			proxy.Transport = KeepAliveTransport(&http.Transport{
+				TLSClientConfig: cfg,
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					log.Printf("rewriting addr %q to %q", addr, newAddr)
+					return dialer.DialContext(ctx, network, newAddr)
+				},
+			})
+
 			serveMux.Handle(path,
 				&UpstreamProxy{u.Host, proxy, auth})
 		case "file":
@@ -150,6 +213,11 @@ func NewOAuthProxy(opts *Options, validator func(string) bool) *OAuthProxy {
 	}
 	for _, u := range opts.CompiledRegex {
 		log.Printf("compiled skip-auth-regex => %q", u)
+	}
+	for h, vv := range opts.CompiledRegexReg {
+		for _, u := range vv {
+			log.Printf("compiled host-skip-auth-regex => %v => %q", h, u)
+		}
 	}
 
 	redirectURL := opts.redirectURL
@@ -198,6 +266,7 @@ func NewOAuthProxy(opts *Options, validator func(string) bool) *OAuthProxy {
 		skipAuthRegex:      opts.SkipAuthRegex,
 		skipAuthPreflight:  opts.SkipAuthPreflight,
 		compiledRegex:      opts.CompiledRegex,
+		compiledRegexReg:   opts.CompiledRegexReg,
 		SetXAuthRequest:    opts.SetXAuthRequest,
 		PassBasicAuth:      opts.PassBasicAuth,
 		PassBearerAuth:     opts.PassBearerAuth,

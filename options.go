@@ -29,6 +29,7 @@ type Options struct {
 	ClientSecret  string `flag:"client-secret" cfg:"client_secret" env:"OAUTH2_PROXY_CLIENT_SECRET"`
 	TLSCertFile   string `flag:"tls-cert" cfg:"tls_cert_file"`
 	TLSKeyFile    string `flag:"tls-key" cfg:"tls_key_file"`
+	TLSCAFile     string `flag:"tls-ca" cfg:"tls_ca_file"`
 
 	AuthenticatedEmailsFile  string   `flag:"authenticated-emails-file" cfg:"authenticated_emails_file"`
 	AzureTenant              string   `flag:"azure-tenant" cfg:"azure_tenant"`
@@ -52,6 +53,7 @@ type Options struct {
 	CookieHttpOnly bool          `flag:"cookie-httponly" cfg:"cookie_httponly"`
 
 	Upstreams             []string `flag:"upstream" cfg:"upstreams"`
+	UpstreamHostname      string   `flag:"upstream-hostname" cfg:"upstream_hostname"`
 	SkipAuthRegex         []string `flag:"skip-auth-regex" cfg:"skip_auth_regex"`
 	PassBasicAuth         bool     `flag:"pass-basic-auth" cfg:"pass_basic_auth"`
 	PassBearerAuth        bool     `flag:"pass-bearer-auth" cfg:"pass_bearer_auth"`
@@ -82,12 +84,13 @@ type Options struct {
 	SignatureKey string `flag:"signature-key" cfg:"signature_key" env:"OAUTH2_PROXY_SIGNATURE_KEY"`
 
 	// internal values that are set after config validation
-	redirectURL   *url.URL
-	proxyURLs     []*url.URL
-	CompiledRegex []*regexp.Regexp
-	provider      providers.Provider
-	signatureData *SignatureData
-	oidcVerifier  *oidc.IDTokenVerifier
+	redirectURL      *url.URL
+	proxyURLs        []*url.URL
+	CompiledRegex    []*regexp.Regexp
+	CompiledRegexReg map[string][]*regexp.Regexp
+	provider         providers.Provider
+	signatureData    *SignatureData
+	oidcVerifier     *oidc.IDTokenVerifier
 }
 
 type SignatureData struct {
@@ -110,12 +113,14 @@ func NewOptions() *Options {
 		SetXAuthRequest:      false,
 		SkipAuthPreflight:    false,
 		PassBasicAuth:        true,
+		PassBearerAuth:       true,
 		PassUserHeaders:      true,
 		PassAccessToken:      false,
 		PassHostHeader:       true,
 		ApprovalPrompt:       "force",
 		RequestLogging:       true,
 		RequestLoggingFormat: defaultRequestLoggingFormat,
+		CompiledRegexReg:     make(map[string][]*regexp.Regexp),
 	}
 }
 
@@ -183,12 +188,21 @@ func (o *Options) Validate() error {
 	}
 
 	for _, u := range o.SkipAuthRegex {
-		CompiledRegex, err := regexp.Compile(u)
+		vv := strings.Split(u, ":")
+		ln := len(vv)
+
+		CompiledRegex, err := regexp.Compile(vv[len(vv)-1])
 		if err != nil {
 			msgs = append(msgs, fmt.Sprintf("error compiling regex=%q %s", u, err))
 			continue
 		}
-		o.CompiledRegex = append(o.CompiledRegex, CompiledRegex)
+		if ln == 1 {
+			o.CompiledRegex = append(o.CompiledRegex, CompiledRegex)
+		} else if ln > 1 {
+			for _, h := range vv[:ln-1] {
+				o.CompiledRegexReg[h] = append(o.CompiledRegexReg[h], CompiledRegex)
+			}
+		}
 	}
 	msgs = parseProviderInfo(o, msgs)
 
